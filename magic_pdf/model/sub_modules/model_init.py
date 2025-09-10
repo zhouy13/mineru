@@ -9,45 +9,10 @@ from magic_pdf.model.sub_modules.mfd.yolov8.YOLOv8 import YOLOv8MFDModel
 from magic_pdf.model.sub_modules.mfr.unimernet.Unimernet import UnimernetModel
 from magic_pdf.model.sub_modules.ocr.paddleocr2pytorch.pytorch_paddle import PytorchPaddleOCR
 from magic_pdf.model.sub_modules.table.rapidtable.rapid_table import RapidTableModel
-# try:
-#     from magic_pdf_ascend_plugin.libs.license_verifier import (
-#         LicenseExpiredError, LicenseFormatError, LicenseSignatureError,
-#         load_license)
-#     from magic_pdf_ascend_plugin.model_plugin.ocr.paddleocr.ppocr_273_npu import ModifiedPaddleOCR
-#     from magic_pdf_ascend_plugin.model_plugin.table.rapidtable.rapid_table_npu import RapidTableModel
-#     license_key = load_license()
-#     logger.info(f'Using Ascend Plugin Success, License id is {license_key["payload"]["id"]},'
-#                 f' License expired at {license_key["payload"]["date"]["end_date"]}')
-# except Exception as e:
-#     if isinstance(e, ImportError):
-#         pass
-#     elif isinstance(e, LicenseFormatError):
-#         logger.error('Ascend Plugin: Invalid license format. Please check the license file.')
-#     elif isinstance(e, LicenseSignatureError):
-#         logger.error('Ascend Plugin: Invalid signature. The license may be tampered with.')
-#     elif isinstance(e, LicenseExpiredError):
-#         logger.error('Ascend Plugin: License has expired. Please renew your license.')
-#     elif isinstance(e, FileNotFoundError):
-#         logger.error('Ascend Plugin: Not found License file.')
-#     else:
-#         logger.error(f'Ascend Plugin: {e}')
-#     from magic_pdf.model.sub_modules.ocr.paddleocr.ppocr_273_mod import ModifiedPaddleOCR
-#     # from magic_pdf.model.sub_modules.ocr.paddleocr.ppocr_291_mod import ModifiedPaddleOCR
-#     from magic_pdf.model.sub_modules.table.rapidtable.rapid_table import RapidTableModel
 
 
 def table_model_init(table_model_type, model_path, max_time, _device_='cpu', lang=None, table_sub_model_name=None):
-    if table_model_type == MODEL_NAME.STRUCT_EQTABLE:
-        from magic_pdf.model.sub_modules.table.structeqtable.struct_eqtable import StructTableModel
-        table_model = StructTableModel(model_path, max_new_tokens=2048, max_time=max_time)
-    elif table_model_type == MODEL_NAME.TABLE_MASTER:
-        from magic_pdf.model.sub_modules.table.tablemaster.tablemaster_paddle import TableMasterPaddleModel
-        config = {
-            'model_dir': model_path,
-            'device': _device_
-        }
-        table_model = TableMasterPaddleModel(config)
-    elif table_model_type == MODEL_NAME.RAPID_TABLE:
+    if table_model_type == MODEL_NAME.RAPID_TABLE:
         atom_model_manager = AtomModelSingleton()
         ocr_engine = atom_model_manager.get_atom_model(
             atom_model_name='ocr',
@@ -88,6 +53,10 @@ def doclayout_yolo_model_init(weight, device='cpu'):
     model = DocLayoutYOLOModel(weight, device)
     return model
 
+def paddex_layout_model_init(device: str, model_dir: str = None):
+    from magic_pdf.model.sub_modules.layout.paddlex_layout.PaddleXLayoutModel import PaddleXLayoutModelWrapper
+    model = PaddleXLayoutModelWrapper(model_name=MODEL_NAME.PaddleXLayoutModel, device=device, model_dir=model_dir)
+    return model
 
 def langdetect_model_init(langdetect_model_weight, device='cpu'):
     if str(device).startswith('npu'):
@@ -163,6 +132,11 @@ def atom_model_init(model_name: str, **kwargs):
             atom_model = doclayout_yolo_model_init(
                 kwargs.get('doclayout_yolo_weights'),
                 kwargs.get('device')
+            )
+        elif kwargs.get('layout_model_name') == MODEL_NAME.PaddleXLayoutModel:
+            atom_model = paddex_layout_model_init(
+                model_dir=kwargs.get('paddlexlayout_model_dir'),
+                device=kwargs.get('device')
             )
         else:
             logger.error('layout model name not allow')

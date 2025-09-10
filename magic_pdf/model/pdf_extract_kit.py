@@ -141,6 +141,22 @@ class CustomPEKModel:
                 ),
                 device=self.device,
             )
+        elif self.layout_model_name == MODEL_NAME.PaddleXLayoutModel:
+            layout_model_path = None
+            if self.layout_model_name in self.configs['weights']:
+                layout_model_path = os.path.join(models_dir, self.configs['weights'][self.layout_model_name])
+                if not os.path.exists(layout_model_path):
+                    raise FileNotFoundError(
+                        f"Layout model file not found at '{layout_model_path}'. "
+                        "Please run 'python download_model.py' to download the required models."
+                    )
+            self.layout_model = atom_model_manager.get_atom_model(
+                atom_model_name=AtomicModel.Layout,
+                layout_model_name=MODEL_NAME.PaddleXLayoutModel,
+                paddlexlayout_model_dir=layout_model_path,
+                device=self.device,
+            )
+
         # 初始化ocr
         self.ocr_model = atom_model_manager.get_atom_model(
             atom_model_name=AtomicModel.OCR,

@@ -2,6 +2,7 @@ import time
 import cv2
 from loguru import logger
 from tqdm import tqdm
+from PIL import Image
 
 from magic_pdf.config.constants import MODEL_NAME
 from magic_pdf.model.sub_modules.model_init import AtomModelSingleton
@@ -11,6 +12,7 @@ from magic_pdf.model.sub_modules.ocr.paddleocr2pytorch.ocr_utils import (
     get_adjusted_mfdetrec_res, get_ocr_result_list)
 
 YOLO_LAYOUT_BASE_BATCH_SIZE = 1
+PP_LAYOUT_BASE_BATCH_SIZE = 8
 MFD_BASE_BATCH_SIZE = 1
 MFR_BASE_BATCH_SIZE = 16
 
@@ -42,38 +44,37 @@ class BatchAnalyze:
         images = [image for image, _, _ in images_with_extra_info]
 
         if self.model.layout_model_name == MODEL_NAME.LAYOUTLMv3:
-            # layoutlmv3
             for image in images:
                 layout_res = self.model.layout_model(image, ignore_catids=[])
                 images_layout_res.append(layout_res)
         elif self.model.layout_model_name == MODEL_NAME.DocLayout_YOLO:
-            # doclayout_yolo
             layout_images = []
             for image_index, image in enumerate(images):
                 layout_images.append(image)
 
             images_layout_res += self.model.layout_model.batch_predict(
-                # layout_images, self.batch_ratio * YOLO_LAYOUT_BASE_BATCH_SIZE
                 layout_images, YOLO_LAYOUT_BASE_BATCH_SIZE
             )
+        elif self.model.layout_model_name == MODEL_NAME.PaddleXLayoutModel:
+            paddlex_layout_images = []
+            for image_index, image in enumerate(images):
+                pil_img = Image.fromarray(image)
+                paddlex_layout_images.append(pil_img)
+            layout_results = self.model.layout_model.batch_predict(
+                paddlex_layout_images, PP_LAYOUT_BASE_BATCH_SIZE
+            )
 
-        # logger.info(
-        #     f'layout time: {round(time.time() - layout_start_time, 2)}, image num: {len(images)}'
-        # )
+            images_layout_res += layout_results
+        else:
+            logger.error(f"Unsupported layout model name: {self.model.layout_model_name}")
+            raise ValueError(f"Unsupported layout model name: {self.model.layout_model_name}")
+
 
         if self.model.apply_formula:
-            # 公式检测
-            mfd_start_time = time.time()
             images_mfd_res = self.model.mfd_model.batch_predict(
-                # images, self.batch_ratio * MFD_BASE_BATCH_SIZE
                 images, MFD_BASE_BATCH_SIZE
             )
-            # logger.info(
-            #     f'mfd time: {round(time.time() - mfd_start_time, 2)}, image num: {len(images)}'
-            # )
 
-            # 公式识别
-            mfr_start_time = time.time()
             images_formula_list = self.model.mfr_model.batch_predict(
                 images_mfd_res,
                 images,
@@ -83,12 +84,8 @@ class BatchAnalyze:
             for image_index in range(len(images)):
                 images_layout_res[image_index] += images_formula_list[image_index]
                 mfr_count += len(images_formula_list[image_index])
-            # logger.info(
-            #     f'mfr time: {round(time.time() - mfr_start_time, 2)}, image num: {mfr_count}'
-            # )
 
-        # 清理显存
-        # clean_vram(self.model.device, vram_threshold=8)
+        clean_vram(self.model.device, vram_threshold=8)
 
         ocr_res_list_all_page = []
         table_res_list_all_page = []
@@ -116,10 +113,6 @@ class BatchAnalyze:
                                                 'table_img':table_img,
                                               })
 
-        # 文本框检测
-        det_start = time.time()
-        det_count = 0
-        # for ocr_res_list_dict in ocr_res_list_all_page:
         for ocr_res_list_dict in tqdm(ocr_res_list_all_page, desc="OCR-det Predict"):
             # Process each area that requires OCR processing
             _lang = ocr_res_list_dict['lang']
@@ -150,14 +143,8 @@ class BatchAnalyze:
                     ocr_result_list = get_ocr_result_list(ocr_res, useful_list, ocr_res_list_dict['ocr_enable'], new_image, _lang)
                     ocr_res_list_dict['layout_res'].extend(ocr_result_list)
 
-            # det_count += len(ocr_res_list_dict['ocr_res_list'])
-        # logger.info(f'ocr-det time: {round(time.time()-det_start, 2)}, image num: {det_count}')
 
-
-        # 表格识别 table recognition
         if self.model.apply_table:
-            table_start = time.time()
-            # for table_res_list_dict in table_res_list_all_page:
             for table_res_dict in tqdm(table_res_list_all_page, desc="Table Predict"):
                 _lang = table_res_dict['lang']
                 atom_model_manager = AtomModelSingleton()
@@ -171,7 +158,6 @@ class BatchAnalyze:
                     table_sub_model_name='slanet_plus'
                 )
                 html_code, table_cell_bboxes, logic_points, elapse = table_model.predict(table_res_dict['table_img'])
-                # 判断是否返回正常
                 if html_code:
                     expected_ending = html_code.strip().endswith(
                         '</html>'
@@ -186,7 +172,6 @@ class BatchAnalyze:
                     logger.warning(
                         'table recognition processing fails, not get html return'
                     )
-            # logger.info(f'table time: {round(time.time() - table_start, 2)}, image num: {len(table_res_list_all_page)}')
 
         # Create dictionaries to store items by language
         need_ocr_lists_by_lang = {}  # Dict of lists for each language
@@ -245,8 +230,6 @@ class BatchAnalyze:
                     total_processed += len(img_crop_list)
 
             rec_time += time.time() - rec_start
-            # logger.info(f'ocr-rec time: {round(rec_time, 2)}, total images processed: {total_processed}')
-
 
 
         return images_layout_res
